@@ -1,0 +1,314 @@
+			############### SECTION 1 #################
+
+SYSTEM CALL TRACING HANDLED -
+ * bitmap definition
+ * 0    : MKDIR
+ * 1    : RMDIR
+ * 2    : UNLINK
+ * 3    : HARDLINK
+ * 4    : SYMLINK
+ * 5    : RENAME
+ * 6    : READ
+ * 7    : WRITE
+ * 8    : OPEN
+ * 9    : CLOSE
+ * 10   : READLINK
+
+
+			############### SECTION 2 #################
+
+COMPILE AND RUN KERNEL CODE -
+
+	To simplify your work, we have created run file inside fs/trfs folder. 
+	This file lists all operation which you can perform over mount directory.
+
+	Working of fs/trfs/run file:
+		The first 3 entries in 'run' file are:
+			1> make clean
+				a> umount /mnt/trfs  - unmount
+				b> rmmod trfs - remove trfs module
+				c> rm -rf /tmp/tfile1.txt - delete trace file
+
+			2> make restore_dir
+				a> removes both dir1 and dir2
+				b> makes dir1
+				c> creates test1.txt file inside dir1
+				d> copies the current state of the dir1 to 
+					create dir2
+
+			**NOTE: If you want to change the path of the dir2, it has been 
+				defined in hw2-USER/hw2/trctl.c as the macro ROOT_PATH.
+
+			3> make trfs
+				a> compiles the modules
+				b> inserts module trfs.ko
+				c> mounts the file system 
+
+
+	To run this file, you need to add entries inside 'run' file.
+	Run the entire code as:
+		$ . run
+	
+	For your convenience, we have also written sample programs for reading from
+	and writing to the files. The sources for 'read.c' and 'write.c' are in the 
+	hw2/hw2 directory.
+	You can edit the source code for them, compile them using the commands given 
+	in SECTION 3, read and write to the files to test the functionality of our code.
+	
+	The files on which to perform read and write have been created in the Makefile of the
+	kernel, so they will be empty when they are created. So perform write first
+	before reading their data.
+
+	After running the 'run' file, you will run the user programs after navigating
+	to the hw2-USER/hw2 directory. You can run the user programs as given below.
+
+
+			############### SECTION 3 #################
+
+COMPILE RUN TREPLAY AND TRCTL:
+
+	**NOTE: Both these files will compile simultaneously, because we 
+		have written a Makefile in the hw2-USER/hw2 directory with
+		two options:
+			> without_extra_credit
+			> with_extra_credit
+
+	1> Compile user programs: 
+		In the hw2-USER/hw2 directory as either one of the following:
+			a> Without extra credit:
+				$ make
+		
+			b> With extra credit:
+				$ make with_extra_credit
+	
+	2> Run user programs:
+		In the hw2-USER/hw2 directory as:
+			a> $ ./treplay -[ns] /tmp/tfile1.txt	
+				-s: abort on deviation
+				-n: print all the traced records
+				
+			**NOTE: If no options are given, treplay will NOT 
+				abort on deviate and will print all traced records as well.
+				Also, if /tmp/
+			
+			When compiled WITHOUT extra credit
+			b> $./trctl x /mnt/trfs
+				'x' can be:
+					'all' : all system calls will be traced
+					'none': no system calls will be traced
+					0xNN : NN can be any hexadecimal number
+					' ' : read bitmap value from file system
+
+				**NOTE: Be sure to enter value of NN in
+					hexadecimal, not in decimal.
+
+	*** WARNING: Make sure if you compile the code for extra credit in kernel
+			and forget to do that in the user code, the user code will
+			enter an infinite loop.
+
+			
+                        ############### SECTION 4 #################
+
+WORKING OF KERNEL CODE:
+
+	FILES ADDED -
+		1> record.h
+			. Global header file referenced both in user level
+			and kernel level code. It contains record structure and
+			system call lists.
+
+		2> treplay.c 
+			Code to replay and show all system calls. Provides two flags (ns).  
+
+		3> trctl.c
+			to code to enable / disable tracing options using ioctl.
+		
+		4> trctl.h
+			prototype of the ioctl system call
+
+	FILES MODIFIED - 
+		1> fs/Makefile
+			Added entry of TRFS into fs/Makefile, so that it will
+			get compiled when kernel is compiled.  
+			(obj-$(CONFIG_TR_FS)+= trfs/)
+
+		2> fs/Kconfig
+			Added directory path into fs/Kconfig  
+			Information of about trfs is loaded when we compile kernel
+			(source "fs/trfs/Kconfig")
+
+		3> .config
+			Added module entry for TRFS file system. 
+			(CONFIG_TRFS=m)
+
+		4> trfs.h 
+			 Added inside superblock private info:
+				. file descriptor
+				. bitmap
+				. mutex lock 
+		
+			Declared extern wrapper strcuture of records which 
+			would be used across all files.
+
+		5> main.c 
+			Involves: 
+				> Check for the mount options.
+				> Parsing the mount option to get trace file path.
+				> Assigning tracefile decriptor to super block private info.
+				> Assigning bitmap value to 4294967295 so that by default 
+					all tracing is enable.
+				> Initiating Kthread which would dump bytes data into tracefile
+                                        after every 5 sec.
+				> Allocating memory to global wrapper structure of record 
+					which is filled with diffrent system call.
+				> Acquire mutex before creating actual record.
+				> Create actual record structure using wrapper structure.
+				> Convert record strcuture into compact byte data.
+				> Create CRC32 checksum of a record structure using 
+					CRC32 API availbale inside kernel crc32.h file.
+				> Prefix checksum to compact data, adding it to buffer if 
+					enough space is available inside buffer otherwise 
+					write buffer data to trace file.
+				> Read and write system call handles data < =PAGE SIZE.
+			Wrapper structure converts the path name and extra data as a container 
+				to store actual record.
+
+		6> file.c - 
+			> Check for enable tracing using value of bitmap for following
+			vfs functions:
+				. Read
+				. write
+				. Open
+				. Release (close file)
+			
+			> Filling following respective filelds of wrapper record strcuture -
+				. type - system call type
+				. return value - return value of system call
+				. file - address of file structure.
+				. flags - Diffrent flags needed for file operation (O_CREAT etc)
+				. extra data - stored ahead of container.
+				. Pathname - file pathname
+				. List of dentry - List of dentry
+					(it can be single also dependes upon vfs function)
+			> And called to main.c to create actual record strcuture.
+			
+			> Get data from user and set bitmap in superblock. Also, read bitmap
+				from super block and send it to user.
+
+		Check for enable tracing using value of bitmap for following vfs function
+					1> create
+					2> symlink
+					3> link
+					4> Readlink 
+					5> mkdir
+					6> rmdir
+					7> rename
+		
+		inode.c -
+			Filling following respective filelds of wrapper record strcuture -
+			1> type - system call type
+			2> return value - return value of system call
+			6> Pathname - file pathname
+			7> List of dentry - List of dentry . (it can be single also dependes upon vfs function)
+			And called to main.c to create actual record strcuture.
+			We are using the concept of container to hadle extra data or ecxtra path name.
+		
+8> super.c - 
+			Clearing memory of output buffer wrapper structure and closing file descriptor and stopping Kthread commands while unmounting inside trfs_put_super.
+                  
+			
+			############### SECTION 5 #################
+			
+WORKING OF USER CODE:
+	The structures which are used for the operations are defined in the
+	fs/trfs/record.h file which is included in both the user and kernel 
+	level codes.
+
+	IOCTL:
+		
+		> The user code in ioctl creates a sample call to the file system
+			in order to set, store and retrieve the bitmap as required.
+		
+		> The bitmap is used as an index into the system calls which the
+			user wants to trace.
+
+		> The bitmap values for each operation are:
+			mkdir		--		0x01
+			rmdir		--		0x04
+			unlink		--		0x08
+			hardlink	--		0x10
+			symlink		--		0x20
+			rename		--		0x40
+			read		--		0x80
+			write		--		0x100
+			open		--		0x200
+			close		--		0x400
+			readlink	--		0x800
+
+	TREPLAY:
+		> To handle the case of the file pointers staying open in the case
+			of open(2) being traced, but not close(2), we have maintained
+			linked list to store:
+				. file descriptor
+				. file pointer -> used to equate entries of two files
+					and close them
+				. next -> pointer to next node in the linked list
+
+		> At the end of the program, all the nodes of the linked list resembling
+			the files left open at the end of its execution are closed and
+			the list is cleared.
+
+		> The functions show_*() are used to display the operations when the '-n'
+			flag is given.
+	
+		> The functions replay_*() are used to replay the operations when
+			the '-s' flag is set.
+
+			############### SECTION 6 #################
+
+EXTRA_CREDIT:
+	1. Implemented incremental ioctl changes.
+	2. Implemented checksum calculation using crc32
+
+	KERNEL CODE:
+		To compile kernel code with EXTRA_CREDIT, add the following line to the Makefile 
+		under the EXTRA_CFLAGS definition:
+			EXTRA_CFLAGS += -DEXTRA_CREDIT=10
+	
+	USER CODE:
+		To run the user programs with EXTRA_CREDIT:
+			Compile with:
+				$ make with_extra_credit
+
+			Run as:
+				$ ./treplay -[ns] /tmp/tfile1.txt
+
+				$ ./trctl  (+/-)read (+/-)write none all +open ... /mnt/trfs
+					[...] can be replaced with any 
+					number of further operations:
+                                		[none, all, (+/-)read, (+/-)write, 0xNN]
+
+		Supported System Calls:
+		
+		mkdir		--	(+/-)mkdir
+		rmdir		--	(+/-)rmdir
+		unlink		--	(+/-)unlink
+		hardlink	--	(+/-)hardlink
+		symlink		--	(+/-)symlink
+		rename		--	(+/-)rename
+		read		--	(+/-)read
+		write		--	(+/-)write
+		open		--	(+/-)open
+		close		--	(+/-)close
+		readlink	--	(+/-)readlink
+
+
+                        ############### SECTION 7 #################
+
+REFERENCES:
+		
+	1> http://stackoverflow.com/questions/40416995/difference-between-crc32-implementations-of-linux-crc32-h-and-zlib-h-in-c
+		-CRC difference in user and kernel code
+	2> http://lxr.free-electrons.com/
+		-linux kernel code and file system functions
+
